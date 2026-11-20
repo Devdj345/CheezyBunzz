@@ -1,0 +1,1985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Cheezy Bunz — POS & Bluetooth Billing</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <!-- Google Fonts: Inter & JetBrains Mono for Thermal Receipt -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#fff7ed',
+              100: '#ffedd5',
+              200: '#fed7aa',
+              400: '#fb923c',
+              500: '#f97316',
+              600: '#ea580c',
+              700: '#c2410c',
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    /* Base touch & mobile UX improvements */
+    html, body {
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior-y: contain;
+    }
+
+    /* Hide scrollbar for category pills */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    /* Authentic 58mm Thermal Paper Visual Preview */
+    .thermal-paper {
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+      width: 280px;
+      max-width: 100%;
+      background: #ffffff;
+      color: #111827;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+      position: relative;
+    }
+
+    /* Serrated receipt bottom edge effect */
+    .thermal-paper::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      bottom: -8px;
+      width: 100%;
+      height: 8px;
+      background: radial-gradient(circle at 6px 8px, transparent 6px, #ffffff 6.5px) repeat-x;
+      background-size: 12px 8px;
+    }
+
+    /* Slide-up drawer animation */
+    @keyframes slideUp {
+      from { transform: translateY(100%); opacity: 0.5; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .animate-slide-up {
+      animation: slideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    /* Subtle pop animation for tap feedback */
+    @keyframes pop {
+      0% { transform: scale(1); }
+      50% { transform: scale(0.96); }
+      100% { transform: scale(1); }
+    }
+    .tap-pop:active {
+      animation: pop 0.12s ease-out;
+    }
+
+    /* Print styling strictly for 58mm Thermal Printer */
+    @media print {
+      @page {
+        size: 58mm auto;
+        margin: 0mm;
+      }
+      body * {
+        visibility: hidden !important;
+      }
+      #print-area, #print-area * {
+        visibility: visible !important;
+      }
+      #print-area {
+        position: fixed !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 58mm !important;
+        margin: 0 !important;
+        padding: 2mm 1.5mm !important;
+        box-shadow: none !important;
+        background: #fff !important;
+        color: #000 !important;
+        font-size: 10px !important;
+        line-height: 1.25 !important;
+      }
+      #print-area::after {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-900 font-sans antialiased selection:bg-brand-200">
+
+  <!-- ==================== TOP APP HEADER ==================== -->
+  <header class="sticky top-0 z-30 bg-slate-900 text-white shadow-md">
+    <div class="max-w-3xl mx-auto px-3.5 py-2.5 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center shadow-inner shrink-0">
+          <i class="fa-solid fa-burger text-white text-lg"></i>
+        </div>
+        <div class="min-w-0">
+          <h1 id="header-shop-name" class="text-base font-extrabold tracking-tight leading-tight truncate">CHEEZY BUNZ</h1>
+          <p class="text-[11px] text-slate-400 truncate flex items-center gap-1">
+            <span id="header-bill-badge" class="text-brand-400 font-semibold">Next: #CB-001</span>
+            <span>•</span>
+            <span id="header-today-sales">Today: ₹0</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Quick Bluetooth Status Pill -->
+      <button onclick="handleHeaderPrinterClick()" id="header-bt-btn"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold transition shrink-0 tap-pop">
+        <span id="header-bt-dot" class="w-2 h-2 rounded-full bg-rose-500"></span>
+        <i class="fa-brands fa-bluetooth-b text-sky-400"></i>
+        <span id="header-bt-text" class="hidden sm:inline">Printer Off</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ==================== MAIN CONTENT AREA ==================== -->
+  <main class="max-w-3xl mx-auto pb-36 min-h-screen">
+
+    <!-- ==================== TAB 1: POS / BILLING ==================== -->
+    <section id="tab-pos" class="tab-section">
+      <!-- Sticky Search & Category Pills -->
+      <div class="sticky top-[56px] z-20 bg-slate-100/95 backdrop-blur-sm pt-3 pb-2 px-3 border-b border-slate-200/80">
+        <!-- Search Input -->
+        <div class="relative mb-2.5">
+          <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+          <input type="text" id="pos-search" oninput="renderPosMenu()"
+            placeholder="Search burger, pizza, fries, shake..."
+            class="w-full pl-9 pr-9 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 shadow-sm" />
+          <button id="pos-search-clear" onclick="clearPosSearch()"
+            class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-xs flex items-center justify-center">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <!-- Category Filter Pills -->
+        <div id="category-pills" class="flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+
+      <!-- Menu Item Grid -->
+      <div id="pos-menu-grid" class="p-3 grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+        <!-- Dynamically populated -->
+      </div>
+
+      <!-- Empty Search State -->
+      <div id="pos-empty-state" class="hidden text-center py-14 px-6">
+        <div class="w-14 h-14 rounded-2xl bg-slate-200 text-slate-400 flex items-center justify-center mx-auto mb-3 text-2xl">
+          <i class="fa-solid fa-utensils"></i>
+        </div>
+        <p class="font-bold text-slate-700">No items found</p>
+        <p class="text-xs text-slate-500 mt-1">Try a different search or add items in Menu Manager.</p>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 2: MENU MANAGER ==================== -->
+    <section id="tab-menu" class="tab-section hidden p-3 space-y-4">
+      <!-- Add / Edit Item Card -->
+      <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
+        <div class="flex items-center justify-between mb-3">
+          <h2 id="menu-form-title" class="text-base font-extrabold text-slate-800 flex items-center gap-2">
+            <i class="fa-solid fa-circle-plus text-brand-500"></i> Add New Menu Item
+          </h2>
+          <button id="menu-cancel-edit" onclick="resetMenuForm()" class="hidden text-xs font-semibold text-rose-600 bg-rose-50 px-2.5 py-1 rounded-lg">
+            Cancel Edit
+          </button>
+        </div>
+
+        <form id="menu-form" onsubmit="saveMenuItem(event)" class="space-y-3">
+          <input type="hidden" id="menu-item-id" />
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">Item Name *</label>
+            <input type="text" id="menu-item-name" required placeholder="e.g., Double Cheese Burger"
+              class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1">Price (₹) *</label>
+              <input type="number" id="menu-item-price" required min="1" step="1" placeholder="e.g., 90"
+                class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1">Category *</label>
+              <select id="menu-item-category" required
+                class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <!-- Populated via JS -->
+              </select>
+            </div>
+          </div>
+
+          <button type="submit" id="menu-submit-btn"
+            class="w-full py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white font-bold text-sm shadow-sm transition tap-pop">
+            <i class="fa-solid fa-check mr-1"></i> Save Item to Menu
+          </button>
+        </form>
+      </div>
+
+      <!-- Existing Menu List -->
+      <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <h3 class="text-sm font-extrabold text-slate-800">
+            All Menu Items (<span id="menu-count">0</span>)
+          </h3>
+          <button onclick="confirmResetDefaultMenu()"
+            class="text-xs font-semibold text-slate-600 hover:text-brand-600 bg-slate-100 px-2.5 py-1.5 rounded-lg">
+            <i class="fa-solid fa-rotate-left mr-1"></i> Reset Defaults
+          </button>
+        </div>
+
+        <input type="text" id="menu-mgr-search" oninput="renderMenuManagerList()"
+          placeholder="Filter menu items..."
+          class="w-full px-3 py-2 mb-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+
+        <div id="menu-mgr-list" class="divide-y divide-slate-100">
+          <!-- Populated via JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 3: SALES & HISTORY ==================== -->
+    <section id="tab-history" class="tab-section hidden p-3 space-y-4">
+      <!-- Today's Dashboard Cards -->
+      <div>
+        <div class="flex items-center justify-between mb-2 px-0.5">
+          <h2 class="text-sm font-extrabold text-slate-800 uppercase tracking-wide">Today's Summary</h2>
+          <span id="history-today-date" class="text-xs font-semibold text-slate-500"></span>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2.5">
+          <div class="bg-gradient-to-br from-brand-500 to-brand-600 text-white rounded-2xl p-3.5 shadow-sm">
+            <p class="text-xs font-semibold text-brand-100">Total Sales</p>
+            <p id="stat-total-sales" class="text-2xl font-extrabold mt-0.5">₹0</p>
+          </div>
+          <div class="bg-slate-900 text-white rounded-2xl p-3.5 shadow-sm">
+            <p class="text-xs font-semibold text-slate-400">Total Orders</p>
+            <p id="stat-total-orders" class="text-2xl font-extrabold mt-0.5">0</p>
+          </div>
+          <div class="bg-white rounded-2xl p-3.5 shadow-sm border border-slate-200">
+            <p class="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+              <i class="fa-solid fa-money-bill-wave text-emerald-500"></i> Cash Total
+            </p>
+            <p id="stat-cash-total" class="text-xl font-extrabold text-slate-800 mt-0.5">₹0</p>
+          </div>
+          <div class="bg-white rounded-2xl p-3.5 shadow-sm border border-slate-200">
+            <p class="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+              <i class="fa-solid fa-mobile-screen-button text-indigo-500"></i> UPI / Online
+            </p>
+            <p id="stat-online-total" class="text-xl font-extrabold text-slate-800 mt-0.5">₹0</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Export & Filter Actions -->
+      <div class="flex flex-wrap items-center justify-between gap-2 bg-white p-3 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+          <button onclick="setHistoryFilter('today')" id="filter-today-btn"
+            class="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-900 shadow-sm">Today</button>
+          <button onclick="setHistoryFilter('all')" id="filter-all-btn"
+            class="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-500">All Bills</button>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button onclick="shareTodaySummaryWhatsApp()"
+            class="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold tap-pop">
+            <i class="fa-brands fa-whatsapp mr-1"></i> Summary
+          </button>
+          <button onclick="exportSalesCSV()"
+            class="px-3 py-1.5 rounded-xl bg-sky-50 text-sky-700 border border-sky-200 text-xs font-bold tap-pop">
+            <i class="fa-solid fa-download mr-1"></i> CSV
+          </button>
+          <button onclick="confirmClearHistory()"
+            class="px-2.5 py-1.5 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 text-xs font-bold tap-pop" title="Clear History">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Past Bills List -->
+      <div id="history-list" class="space-y-2.5">
+        <!-- Populated via JS -->
+      </div>
+    </section>
+
+    <!-- ==================== TAB 4: SETTINGS ==================== -->
+    <section id="tab-settings" class="tab-section hidden p-3 space-y-4">
+      <!-- Bluetooth Thermal Printer Card -->
+      <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-base font-extrabold text-slate-800 flex items-center gap-2">
+            <i class="fa-solid fa-print text-brand-500"></i> Bluetooth Thermal Printer (58mm)
+          </h2>
+          <span id="settings-bt-badge" class="text-xs font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-700">
+            Disconnected
+          </span>
+        </div>
+
+        <p id="settings-bt-device-name" class="text-xs text-slate-500 mb-3">
+          Connect a 58mm BLE thermal printer directly via Chrome Web Bluetooth, or use the RawBT app on Android for classic Bluetooth printers.
+        </p>
+
+        <div class="grid grid-cols-2 gap-2.5 mb-2.5">
+          <button onclick="connectBluetoothPrinter()" id="btn-connect-bt"
+            class="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 tap-pop">
+            <i class="fa-brands fa-bluetooth-b text-sky-400 text-sm"></i> Connect Printer
+          </button>
+          <button onclick="testBluetoothPrint()"
+            class="py-2.5 px-3 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 font-bold text-xs flex items-center justify-center gap-1.5 tap-pop">
+            <i class="fa-solid fa-receipt"></i> Test BLE Print
+          </button>
+        </div>
+
+        <button onclick="testRawBTPrint()"
+          class="w-full py-2.5 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs flex items-center justify-center gap-1.5 tap-pop">
+          <i class="fa-brands fa-android text-sm"></i> Test RawBT Print (Android Classic BT)
+        </button>
+
+        <div class="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
+          <strong>Printer Tip:</strong> Agar aapka 58mm printer purana Classic Bluetooth (SPP) hai aur Chrome direct list me nahi dikhata, toh Play Store se free <strong>RawBT Print Service</strong> app install karke printer pair kar lein — phir bill ke <strong>"RawBT Print"</strong> button se 1-tap me receipt niklegi!
+        </div>
+      </div>
+
+      <!-- Shop Details Form -->
+      <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
+        <h2 class="text-base font-extrabold text-slate-800 flex items-center gap-2 mb-3">
+          <i class="fa-solid fa-store text-brand-500"></i> Business & Receipt Details
+        </h2>
+
+        <form id="settings-form" onsubmit="saveSettings(event)" class="space-y-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">Shop Name</label>
+            <input type="text" id="set-shop-name" required
+              class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">Address</label>
+            <textarea id="set-shop-address" rows="2" required
+              class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500"></textarea>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">Contact Phone</label>
+            <input type="text" id="set-shop-phone" required
+              class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">Receipt Footer Message</label>
+            <input type="text" id="set-shop-footer" required
+              class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+
+          <button type="submit"
+            class="w-full py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white font-bold text-sm shadow-sm transition tap-pop">
+            <i class="fa-solid fa-floppy-disk mr-1"></i> Save Settings
+          </button>
+        </form>
+      </div>
+
+      <!-- Bill Counter Management -->
+      <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 flex items-center justify-between gap-3">
+        <div>
+          <h3 class="text-sm font-extrabold text-slate-800">Bill Number Counter</h3>
+          <p class="text-xs text-slate-500">Current next bill: <strong id="settings-next-bill" class="text-brand-600">#CB-001</strong></p>
+        </div>
+        <button onclick="confirmResetBillCounter()"
+          class="px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 text-xs font-bold tap-pop">
+          Reset to #CB-001
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==================== STICKY CART SUMMARY BAR (POS TAB ONLY) ==================== -->
+  <div id="sticky-cart-bar" class="hidden fixed bottom-[64px] left-0 right-0 z-30 px-3 pb-2 pointer-events-none">
+    <div class="max-w-3xl mx-auto pointer-events-auto">
+      <div onclick="openCartDrawer()"
+        class="bg-slate-900 text-white rounded-2xl px-4 py-3 shadow-xl border border-slate-700 flex items-center justify-between cursor-pointer tap-pop">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-brand-500 flex items-center justify-center font-extrabold text-base shadow-inner" id="sticky-cart-count">
+            0
+          </div>
+          <div>
+            <p class="text-[11px] text-slate-400 font-semibold uppercase tracking-wide">Total Payable</p>
+            <p class="text-lg font-extrabold leading-tight" id="sticky-cart-total">₹0</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 bg-brand-500 hover:bg-brand-600 px-4 py-2.5 rounded-xl font-bold text-sm shadow-md">
+          <span>View Bill / Print</span>
+          <i class="fa-solid fa-arrow-right text-xs"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== BOTTOM NAVIGATION BAR ==================== -->
+  <nav class="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-slate-200 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
+    <div class="max-w-3xl mx-auto grid grid-cols-4 h-16">
+      <button onclick="switchTab('pos')" data-tab="pos" class="nav-btn flex flex-col items-center justify-center gap-0.5 text-brand-600 font-bold">
+        <i class="fa-solid fa-cash-register text-lg"></i>
+        <span class="text-[11px]">Billing</span>
+      </button>
+      <button onclick="switchTab('menu')" data-tab="menu" class="nav-btn flex flex-col items-center justify-center gap-0.5 text-slate-400 font-semibold">
+        <i class="fa-solid fa-burger text-lg"></i>
+        <span class="text-[11px]">Menu</span>
+      </button>
+      <button onclick="switchTab('history')" data-tab="history" class="nav-btn flex flex-col items-center justify-center gap-0.5 text-slate-400 font-semibold">
+        <i class="fa-solid fa-clock-rotate-left text-lg"></i>
+        <span class="text-[11px]">Sales</span>
+      </button>
+      <button onclick="switchTab('settings')" data-tab="settings" class="nav-btn flex flex-col items-center justify-center gap-0.5 text-slate-400 font-semibold">
+        <i class="fa-solid fa-gear text-lg"></i>
+        <span class="text-[11px]">Settings</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ==================== CART / CHECKOUT DRAWER MODAL ==================== -->
+  <div id="cart-drawer-overlay" class="hidden fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-xs flex items-end sm:items-center justify-center">
+    <div class="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-3xl max-h-[92vh] flex flex-col shadow-2xl animate-slide-up overflow-hidden">
+      <!-- Drawer Header -->
+      <div class="px-4 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+        <div>
+          <h3 class="text-base font-extrabold text-slate-900 flex items-center gap-2">
+            <i class="fa-solid fa-receipt text-brand-500"></i> Current Order
+            <span id="drawer-bill-no" class="text-xs bg-brand-100 text-brand-700 px-2 py-0.5 rounded-lg font-bold">#CB-001</span>
+          </h3>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="confirmClearCart()" class="text-xs font-bold text-rose-600 bg-rose-50 px-2.5 py-1.5 rounded-lg">
+            Clear
+          </button>
+          <button onclick="closeCartDrawer()" class="w-8 h-8 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Scrollable Cart Body -->
+      <div class="p-4 overflow-y-auto space-y-4 flex-1">
+        <!-- Cart Items -->
+        <div id="drawer-cart-items" class="divide-y divide-slate-100">
+          <!-- Populated dynamically -->
+        </div>
+
+        <!-- Order Type Toggle -->
+        <div>
+          <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">Order Type</label>
+          <div class="grid grid-cols-3 gap-2" id="order-type-group">
+            <button type="button" onclick="setOrderType('Takeaway')" data-type="Takeaway"
+              class="order-type-btn py-2 rounded-xl text-xs font-bold border-2 border-brand-500 bg-brand-50 text-brand-700">
+              <i class="fa-solid fa-bag-shopping mr-1"></i> Takeaway
+            </button>
+            <button type="button" onclick="setOrderType('Dine-in')" data-type="Dine-in"
+              class="order-type-btn py-2 rounded-xl text-xs font-bold border border-slate-200 bg-white text-slate-600">
+              <i class="fa-solid fa-utensils mr-1"></i> Dine-in
+            </button>
+            <button type="button" onclick="setOrderType('Delivery')" data-type="Delivery"
+              class="order-type-btn py-2 rounded-xl text-xs font-bold border border-slate-200 bg-white text-slate-600">
+              <i class="fa-solid fa-motorcycle mr-1"></i> Delivery
+            </button>
+          </div>
+        </div>
+
+        <!-- Payment Mode Selector -->
+        <div>
+          <label class="block text-xs font-bold text-slate-500 uppercase mb-1.5">Payment Mode</label>
+          <div class="grid grid-cols-3 gap-2" id="payment-mode-group">
+            <button type="button" onclick="setPaymentMode('Cash')" data-mode="Cash"
+              class="pay-mode-btn py-2 rounded-xl text-xs font-bold border-2 border-emerald-500 bg-emerald-50 text-emerald-700">
+              <i class="fa-solid fa-money-bill-wave mr-1"></i> Cash
+            </button>
+            <button type="button" onclick="setPaymentMode('UPI')" data-mode="UPI"
+              class="pay-mode-btn py-2 rounded-xl text-xs font-bold border border-slate-200 bg-white text-slate-600">
+              <i class="fa-solid fa-qrcode mr-1"></i> UPI
+            </button>
+            <button type="button" onclick="setPaymentMode('Online')" data-mode="Online"
+              class="pay-mode-btn py-2 rounded-xl text-xs font-bold border border-slate-200 bg-white text-slate-600">
+              <i class="fa-solid fa-credit-card mr-1"></i> Online
+            </button>
+          </div>
+        </div>
+
+        <!-- Discount & Customer Info -->
+        <div class="grid grid-cols-2 gap-2.5">
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1">Discount (₹)</label>
+            <input type="number" id="checkout-discount" min="0" value="0" oninput="updateCheckoutTotals()"
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1">Customer Phone (Opt.)</label>
+            <input type="tel" id="checkout-phone" placeholder="10-digit mobile"
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1">Customer Name (Optional)</label>
+          <input type="text" id="checkout-customer" placeholder="e.g., Rahul"
+            class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500" />
+        </div>
+
+        <!-- Bill Totals Breakdown -->
+        <div class="bg-slate-50 rounded-2xl p-3.5 border border-slate-200 space-y-1.5 text-sm">
+          <div class="flex justify-between text-slate-600">
+            <span>Subtotal</span>
+            <span id="checkout-subtotal" class="font-semibold">₹0</span>
+          </div>
+          <div id="checkout-discount-row" class="hidden flex justify-between text-emerald-600">
+            <span>Discount</span>
+            <span id="checkout-discount-display" class="font-semibold">-₹0</span>
+          </div>
+          <div class="border-t border-slate-200 pt-2 flex justify-between text-base font-extrabold text-slate-900">
+            <span>Grand Total</span>
+            <span id="checkout-grand-total" class="text-brand-600">₹0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sticky Footer Action -->
+      <div class="p-4 border-t border-slate-200 bg-white">
+        <button onclick="generateBill()"
+          class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-600 hover:to-brand-700 text-white font-extrabold text-base shadow-lg flex items-center justify-center gap-2 tap-pop">
+          <i class="fa-solid fa-print"></i> Generate Bill & Print
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 58MM THERMAL RECEIPT PREVIEW MODAL ==================== -->
+  <div id="receipt-modal-overlay" class="hidden fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-3 overflow-y-auto">
+    <div class="bg-slate-100 w-full max-w-md rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[94vh] flex flex-col animate-slide-up">
+      <!-- Modal Header -->
+      <div class="px-4 py-3 bg-slate-900 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-receipt text-brand-400"></i>
+          <h3 class="font-extrabold text-sm">58mm Thermal Receipt</h3>
+        </div>
+        <button onclick="closeReceiptModal()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- Receipt Visual Preview Area -->
+      <div class="p-4 overflow-y-auto flex-1 flex flex-col items-center">
+        <!-- Printable 58mm Paper -->
+        <div id="print-area" class="thermal-paper p-4 text-[11px] leading-[1.35] rounded-t-sm">
+          <!-- Populated dynamically with authentic 32-char thermal layout -->
+        </div>
+
+        <!-- Bluetooth Status Hint -->
+        <div id="receipt-bt-status" class="mt-4 text-[11px] font-semibold text-slate-600 text-center"></div>
+      </div>
+
+      <!-- Four Action Buttons -->
+      <div class="p-3.5 bg-white border-t border-slate-200 space-y-2">
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick="printCurrentBillBluetooth()"
+            class="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm tap-pop">
+            <i class="fa-brands fa-bluetooth-b text-sky-400 text-sm"></i> Bluetooth Print
+          </button>
+          <button onclick="printCurrentBillRawBT()"
+            class="py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm tap-pop">
+            <i class="fa-brands fa-android text-sm"></i> RawBT Print
+          </button>
+          <button onclick="printCurrentBillSystem()"
+            class="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-bold text-xs flex items-center justify-center gap-1.5 tap-pop">
+            <i class="fa-solid fa-file-pdf text-rose-500"></i> System Print / PDF
+          </button>
+          <button onclick="shareCurrentBillWhatsApp()"
+            class="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm tap-pop">
+            <i class="fa-brands fa-whatsapp text-sm"></i> WhatsApp Bill
+          </button>
+        </div>
+
+        <button onclick="closeReceiptModal()"
+          class="w-full py-2.5 rounded-xl bg-brand-50 text-brand-700 font-extrabold text-xs border border-brand-200 tap-pop">
+          Done / New Order
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== CUSTOM CONFIRMATION DIALOG (NO alert/confirm) ==================== -->
+  <div id="confirm-modal-overlay" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-xs rounded-2xl p-5 shadow-2xl text-center">
+      <div class="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3 text-xl">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+      </div>
+      <h3 id="confirm-title" class="text-base font-extrabold text-slate-900">Are you sure?</h3>
+      <p id="confirm-message" class="text-xs text-slate-500 mt-1.5 leading-relaxed"></p>
+      <div class="grid grid-cols-2 gap-2.5 mt-5">
+        <button onclick="closeConfirmModal()" class="py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs">Cancel</button>
+        <button id="confirm-ok-btn" class="py-2.5 rounded-xl bg-rose-600 text-white font-bold text-xs">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TOAST NOTIFICATION ==================== -->
+  <div id="toast-container" class="fixed top-16 left-1/2 -translate-x-1/2 z-[60] w-[92%] max-w-sm pointer-events-none space-y-2"></div>
+
+  <!-- ==================== APPLICATION JAVASCRIPT ==================== -->
+  <script>
+    /* =========================================================================
+       1. CONSTANTS, DEFAULTS & STATE
+       ========================================================================= */
+    const STORAGE_KEYS = {
+      SETTINGS: 'cheezy_bunz_settings_v1',
+      MENU: 'cheezy_bunz_menu_v1',
+      HISTORY: 'cheezy_bunz_history_v1',
+      BILL_SEQ: 'cheezy_bunz_bill_seq_v1'
+    };
+
+    const CATEGORIES = [
+      'All',
+      'Burgers',
+      'Pizza',
+      'Sandwiches',
+      'Wraps & Rolls',
+      'Pasta & Maggi',
+      'Fries & Sides',
+      'Shakes & Coolers'
+    ];
+
+    const CATEGORY_COLORS = {
+      'Burgers': 'bg-orange-100 text-orange-700',
+      'Pizza': 'bg-red-100 text-red-700',
+      'Sandwiches': 'bg-amber-100 text-amber-800',
+      'Wraps & Rolls': 'bg-yellow-100 text-yellow-800',
+      'Pasta & Maggi': 'bg-rose-100 text-rose-700',
+      'Fries & Sides': 'bg-lime-100 text-lime-800',
+      'Shakes & Coolers': 'bg-sky-100 text-sky-700'
+    };
+
+    const DEFAULT_SETTINGS = {
+      shopName: 'CHEEZY BUNZ',
+      address: 'Kalehimata Mandir, Gopalbagh, Damohnaka, Jabalpur',
+      phone: '+91 9098632728',
+      footer: 'Thank You! Visit Again!'
+    };
+
+    const DEFAULT_MENU = [
+      // Burgers
+      { id: 'm1', name: 'Classic Veg Burger', price: 60, category: 'Burgers' },
+      { id: 'm2', name: 'Cheezy Bunz Special Burger', price: 90, category: 'Burgers' },
+      { id: 'm3', name: 'Double Cheese Tikki Burger', price: 100, category: 'Burgers' },
+      { id: 'm4', name: 'Paneer Crispy Burger', price: 110, category: 'Burgers' },
+      { id: 'm5', name: 'Peri Peri Spicy Burger', price: 80, category: 'Burgers' },
+      // Pizza
+      { id: 'm6', name: 'Margherita Cheese Pizza', price: 120, category: 'Pizza' },
+      { id: 'm7', name: 'Cheese Corn Pizza', price: 140, category: 'Pizza' },
+      { id: 'm8', name: 'OTC Veg Loaded Pizza', price: 150, category: 'Pizza' },
+      { id: 'm9', name: 'Tandoori Paneer Pizza', price: 180, category: 'Pizza' },
+      // Sandwiches
+      { id: 'm10', name: 'Veg Grilled Sandwich', price: 70, category: 'Sandwiches' },
+      { id: 'm11', name: 'Cheese Corn Sandwich', price: 90, category: 'Sandwiches' },
+      { id: 'm12', name: 'Bombay Masala Sandwich', price: 80, category: 'Sandwiches' },
+      { id: 'm13', name: 'Paneer Tikka Sandwich', price: 110, category: 'Sandwiches' },
+      // Wraps & Rolls
+      { id: 'm14', name: 'Veg Crispy Roll', price: 60, category: 'Wraps & Rolls' },
+      { id: 'm15', name: 'Paneer Roll', price: 80, category: 'Wraps & Rolls' },
+      { id: 'm16', name: 'Cheesy Veg Wrap', price: 95, category: 'Wraps & Rolls' },
+      // Pasta & Maggi
+      { id: 'm17', name: 'Masala Maggi', price: 50, category: 'Pasta & Maggi' },
+      { id: 'm18', name: 'Cheese Butter Maggi', price: 75, category: 'Pasta & Maggi' },
+      { id: 'm19', name: 'White Sauce Pasta', price: 110, category: 'Pasta & Maggi' },
+      { id: 'm20', name: 'Red Sauce Arrabbiata Pasta', price: 100, category: 'Pasta & Maggi' },
+      // Fries & Sides
+      { id: 'm21', name: 'Classic Salted Fries', price: 60, category: 'Fries & Sides' },
+      { id: 'm22', name: 'Peri Peri Fries', price: 70, category: 'Fries & Sides' },
+      { id: 'm23', name: 'Cheesy Loaded Fries', price: 95, category: 'Fries & Sides' },
+      { id: 'm24', name: 'Garlic Bread (4 pcs)', price: 80, category: 'Fries & Sides' },
+      // Shakes & Coolers
+      { id: 'm25', name: 'Cold Coffee', price: 70, category: 'Shakes & Coolers' },
+      { id: 'm26', name: 'Oreo Thick Shake', price: 90, category: 'Shakes & Coolers' },
+      { id: 'm27', name: 'KitKat Shake', price: 95, category: 'Shakes & Coolers' },
+      { id: 'm28', name: 'Virgin Mint Mojito', price: 65, category: 'Shakes & Coolers' }
+    ];
+
+    // App Runtime State
+    let settings = loadFromStorage(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS);
+    let menuItems = loadFromStorage(STORAGE_KEYS.MENU, DEFAULT_MENU);
+    let billHistory = loadFromStorage(STORAGE_KEYS.HISTORY, []);
+    let billSeq = loadFromStorage(STORAGE_KEYS.BILL_SEQ, 1);
+
+    let activeTab = 'pos';
+    let selectedCategory = 'All';
+    let cart = {}; // { itemId: quantity }
+    let checkoutOrderType = 'Takeaway';
+    let checkoutPaymentMode = 'Cash';
+    let currentReceiptBill = null;
+    let historyFilter = 'today';
+
+    // Web Bluetooth Printer State
+    let btDevice = null;
+    let btCharacteristic = null;
+
+    // Common 58mm BLE Thermal Printer Service & Characteristic UUIDs
+    const PRINTER_SERVICES = [
+      '000018f0-0000-1000-8000-00805f9b34fb',
+      'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
+      '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+      '0000ff00-0000-1000-8000-00805f9b34fb',
+      '0000fee7-0000-1000-8000-00805f9b34fb',
+      '0000ae30-0000-1000-8000-00805f9b34fb'
+    ];
+
+    /* =========================================================================
+       2. STORAGE & UTILITY HELPERS
+       ========================================================================= */
+    function loadFromStorage(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return JSON.parse(JSON.stringify(fallback));
+        return JSON.parse(raw);
+      } catch (err) {
+        console.error('Storage load error:', err);
+        return JSON.parse(JSON.stringify(fallback));
+      }
+    }
+
+    function saveToStorage(key, data) {
+      try {
+        localStorage.setItem(key, JSON.stringify(data));
+      } catch (err) {
+        showToast('Storage error: Could not save data.', 'error');
+      }
+    }
+
+    function formatBillNo(num) {
+      return '#CB-' + String(num).padStart(3, '0');
+    }
+
+    function getTodayDateString() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    function formatDisplayDateTime(isoString) {
+      const d = new Date(isoString);
+      const day = String(d.getDate()).padStart(2, '0');
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const mon = months[d.getMonth()];
+      const yr = d.getFullYear();
+      let hrs = d.getHours();
+      const mins = String(d.getMinutes()).padStart(2, '0');
+      const ampm = hrs >= 12 ? 'PM' : 'AM';
+      hrs = hrs % 12 || 12;
+      return `${day} ${mon} ${yr}, ${hrs}:${mins} ${ampm}`;
+    }
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    /* =========================================================================
+       3. TOAST & CUSTOM CONFIRMATION MODAL
+       ========================================================================= */
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      const styles = {
+        success: 'bg-emerald-600 text-white',
+        error: 'bg-rose-600 text-white',
+        warning: 'bg-amber-500 text-slate-950',
+        info: 'bg-slate-900 text-white'
+      };
+      const icons = {
+        success: 'fa-circle-check',
+        error: 'fa-circle-exclamation',
+        warning: 'fa-triangle-exclamation',
+        info: 'fa-circle-info'
+      };
+
+      toast.className = `${styles[type] || styles.info} px-4 py-2.5 rounded-xl shadow-lg text-xs font-bold flex items-center gap-2 transition-all duration-200 pointer-events-auto`;
+      toast.innerHTML = `<i class="fa-solid ${icons[type] || icons.info} text-sm shrink-0"></i><span>${escapeHtml(message)}</span>`;
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-8px)';
+        setTimeout(() => toast.remove(), 220);
+      }, 2800);
+    }
+
+    let confirmCallback = null;
+    function openConfirmModal(title, message, onConfirm) {
+      document.getElementById('confirm-title').textContent = title;
+      document.getElementById('confirm-message').textContent = message;
+      confirmCallback = onConfirm;
+      document.getElementById('confirm-modal-overlay').classList.remove('hidden');
+    }
+
+    function closeConfirmModal() {
+      document.getElementById('confirm-modal-overlay').classList.add('hidden');
+      confirmCallback = null;
+    }
+
+    document.getElementById('confirm-ok-btn').addEventListener('click', () => {
+      if (typeof confirmCallback === 'function') {
+        confirmCallback();
+      }
+      closeConfirmModal();
+    });
+
+    /* =========================================================================
+       4. TAB NAVIGATION & HEADER SYNC
+       ========================================================================= */
+    function switchTab(tabName) {
+      activeTab = tabName;
+      document.querySelectorAll('.tab-section').forEach(el => el.classList.add('hidden'));
+      document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+
+      // Update Bottom Nav active state
+      document.querySelectorAll('.nav-btn').forEach(btn => {
+        const isCurrent = btn.getAttribute('data-tab') === tabName;
+        btn.classList.toggle('text-brand-600', isCurrent);
+        btn.classList.toggle('font-bold', isCurrent);
+        btn.classList.toggle('text-slate-400', !isCurrent);
+        btn.classList.toggle('font-semibold', !isCurrent);
+      });
+
+      // Refresh tab-specific views
+      if (tabName === 'pos') {
+        renderPosMenu();
+        updateStickyCartBar();
+      } else {
+        document.getElementById('sticky-cart-bar').classList.add('hidden');
+      }
+
+      if (tabName === 'menu') renderMenuManagerList();
+      if (tabName === 'history') renderHistoryTab();
+      if (tabName === 'settings') populateSettingsForm();
+
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
+
+    function updateHeaderInfo() {
+      document.getElementById('header-shop-name').textContent = settings.shopName;
+      document.getElementById('header-bill-badge').textContent = 'Next: ' + formatBillNo(billSeq);
+
+      const todayStr = getTodayDateString();
+      const todaySales = billHistory
+        .filter(b => b.dateKey === todayStr)
+        .reduce((sum, b) => sum + b.grandTotal, 0);
+      document.getElementById('header-today-sales').textContent = `Today: ₹${todaySales}`;
+    }
+
+    /* =========================================================================
+       5. POS / BILLING TAB LOGIC
+       ========================================================================= */
+    function renderCategoryPills() {
+      const container = document.getElementById('category-pills');
+      container.innerHTML = CATEGORIES.map(cat => {
+        const active = cat === selectedCategory;
+        return `
+          <button onclick="selectCategory('${cat.replace(/'/g, "\\'")}')"
+            class="px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition tap-pop ${
+              active
+                ? 'bg-brand-500 text-white shadow-sm'
+                : 'bg-white text-slate-600 border border-slate-200 hover:border-brand-300'
+            }">
+            ${escapeHtml(cat)}
+          </button>
+        `;
+      }).join('');
+    }
+
+    function selectCategory(cat) {
+      selectedCategory = cat;
+      renderCategoryPills();
+      renderPosMenu();
+    }
+
+    function clearPosSearch() {
+      document.getElementById('pos-search').value = '';
+      renderPosMenu();
+    }
+
+    function renderPosMenu() {
+      const searchInput = document.getElementById('pos-search');
+      const query = (searchInput.value || '').trim().toLowerCase();
+      document.getElementById('pos-search-clear').classList.toggle('hidden', !query);
+
+      const filtered = menuItems.filter(item => {
+        const matchesCat = selectedCategory === 'All' || item.category === selectedCategory;
+        const matchesQuery = !query || item.name.toLowerCase().includes(query) || item.category.toLowerCase().includes(query);
+        return matchesCat && matchesQuery;
+      });
+
+      const grid = document.getElementById('pos-menu-grid');
+      const empty = document.getElementById('pos-empty-state');
+
+      if (filtered.length === 0) {
+        grid.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+      }
+
+      empty.classList.add('hidden');
+      grid.innerHTML = filtered.map(item => {
+        const qty = cart[item.id] || 0;
+        const catColor = CATEGORY_COLORS[item.category] || 'bg-slate-100 text-slate-700';
+        const activeRing = qty > 0 ? 'ring-2 ring-brand-500 border-brand-400 bg-brand-50/40' : 'border-slate-200 bg-white';
+
+        return `
+          <div onclick="addToCart('${item.id}')"
+            class="relative rounded-2xl p-3 border ${activeRing} shadow-sm flex flex-col justify-between min-h-[118px] cursor-pointer select-none transition tap-pop">
+            ${qty > 0 ? `
+              <span class="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-brand-500 text-white text-xs font-extrabold flex items-center justify-center shadow-md border-2 border-white">
+                ${qty}
+              </span>
+            ` : ''}
+
+            <div>
+              <span class="inline-block text-[10px] font-bold px-2 py-0.5 rounded-md ${catColor} mb-1.5">
+                ${escapeHtml(item.category)}
+              </span>
+              <h3 class="text-[13px] font-bold text-slate-900 leading-snug line-clamp-2">
+                ${escapeHtml(item.name)}
+              </h3>
+            </div>
+
+            <div class="mt-2.5 flex items-center justify-between gap-1">
+              <span class="text-base font-extrabold text-slate-900">₹${item.price}</span>
+
+              ${qty > 0 ? `
+                <div onclick="event.stopPropagation()" class="flex items-center bg-white border border-brand-300 rounded-xl overflow-hidden shadow-xs">
+                  <button onclick="updateCartQty('${item.id}', -1)"
+                    class="w-7 h-7 flex items-center justify-center text-brand-600 hover:bg-brand-50 font-extrabold text-sm">
+                    <i class="fa-solid fa-minus text-[10px]"></i>
+                  </button>
+                  <span class="px-1.5 text-xs font-extrabold text-slate-900 min-w-[20px] text-center">${qty}</span>
+                  <button onclick="updateCartQty('${item.id}', 1)"
+                    class="w-7 h-7 flex items-center justify-center bg-brand-500 text-white font-extrabold text-sm">
+                    <i class="fa-solid fa-plus text-[10px]"></i>
+                  </button>
+                </div>
+              ` : `
+                <button onclick="event.stopPropagation(); addToCart('${item.id}')"
+                  class="px-2.5 py-1 rounded-xl bg-brand-50 text-brand-700 border border-brand-200 text-xs font-extrabold">
+                  + ADD
+                </button>
+              `}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function addToCart(itemId) {
+      cart[itemId] = (cart[itemId] || 0) + 1;
+      renderPosMenu();
+      updateStickyCartBar();
+    }
+
+    function updateCartQty(itemId, delta) {
+      const next = (cart[itemId] || 0) + delta;
+      if (next <= 0) {
+        delete cart[itemId];
+      } else {
+        cart[itemId] = next;
+      }
+      renderPosMenu();
+      updateStickyCartBar();
+      if (!document.getElementById('cart-drawer-overlay').classList.contains('hidden')) {
+        renderCartDrawerItems();
+      }
+    }
+
+    function getCartDetails() {
+      const items = [];
+      let totalQty = 0;
+      let subtotal = 0;
+
+      for (const [id, qty] of Object.entries(cart)) {
+        const menuItem = menuItems.find(m => m.id === id);
+        if (menuItem && qty > 0) {
+          const lineTotal = menuItem.price * qty;
+          items.push({
+            id: menuItem.id,
+            name: menuItem.name,
+            price: menuItem.price,
+            qty: qty,
+            total: lineTotal
+          });
+          totalQty += qty;
+          subtotal += lineTotal;
+        }
+      }
+      return { items, totalQty, subtotal };
+    }
+
+    function updateStickyCartBar() {
+      const bar = document.getElementById('sticky-cart-bar');
+      const { totalQty, subtotal } = getCartDetails();
+
+      if (activeTab === 'pos' && totalQty > 0) {
+        document.getElementById('sticky-cart-count').textContent = totalQty;
+        document.getElementById('sticky-cart-total').textContent = `₹${subtotal}`;
+        bar.classList.remove('hidden');
+      } else {
+        bar.classList.add('hidden');
+      }
+    }
+
+    /* =========================================================================
+       6. CART DRAWER & CHECKOUT LOGIC
+       ========================================================================= */
+    function openCartDrawer() {
+      const { totalQty } = getCartDetails();
+      if (totalQty === 0) {
+        showToast('Cart is empty. Tap items to add.', 'warning');
+        return;
+      }
+      document.getElementById('drawer-bill-no').textContent = formatBillNo(billSeq);
+      renderCartDrawerItems();
+      document.getElementById('cart-drawer-overlay').classList.remove('hidden');
+    }
+
+    function closeCartDrawer() {
+      document.getElementById('cart-drawer-overlay').classList.add('hidden');
+    }
+
+    function confirmClearCart() {
+      openConfirmModal('Clear Current Cart?', 'All selected items in this order will be removed.', () => {
+        cart = {};
+        document.getElementById('checkout-discount').value = 0;
+        document.getElementById('checkout-customer').value = '';
+        document.getElementById('checkout-phone').value = '';
+        closeCartDrawer();
+        renderPosMenu();
+        updateStickyCartBar();
+        showToast('Cart cleared', 'info');
+      });
+    }
+
+    function renderCartDrawerItems() {
+      const { items } = getCartDetails();
+      const container = document.getElementById('drawer-cart-items');
+
+      if (items.length === 0) {
+        closeCartDrawer();
+        return;
+      }
+
+      container.innerHTML = items.map(item => `
+        <div class="py-2.5 flex items-center justify-between gap-2">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-bold text-slate-900 truncate">${escapeHtml(item.name)}</p>
+            <p class="text-xs text-slate-500">₹${item.price} × ${item.qty} = <strong class="text-slate-800">₹${item.total}</strong></p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <div class="flex items-center bg-slate-100 rounded-xl border border-slate-200 overflow-hidden">
+              <button onclick="updateCartQty('${item.id}', -1)" class="w-8 h-8 flex items-center justify-center text-slate-700 font-bold">
+                <i class="fa-solid fa-minus text-xs"></i>
+              </button>
+              <span class="px-2 text-xs font-extrabold text-slate-900">${item.qty}</span>
+              <button onclick="updateCartQty('${item.id}', 1)" class="w-8 h-8 flex items-center justify-center bg-brand-500 text-white font-bold">
+                <i class="fa-solid fa-plus text-xs"></i>
+              </button>
+            </div>
+            <button onclick="updateCartQty('${item.id}', -${item.qty})" class="w-8 h-8 rounded-xl bg-rose-50 text-rose-500 flex items-center justify-center" title="Remove">
+              <i class="fa-solid fa-trash-can text-xs"></i>
+            </button>
+          </div>
+        </div>
+      `).join('');
+
+      updateCheckoutTotals();
+    }
+
+    function setOrderType(type) {
+      checkoutOrderType = type;
+      document.querySelectorAll('.order-type-btn').forEach(btn => {
+        const active = btn.getAttribute('data-type') === type;
+        btn.className = `order-type-btn py-2 rounded-xl text-xs font-bold ${
+          active
+            ? 'border-2 border-brand-500 bg-brand-50 text-brand-700'
+            : 'border border-slate-200 bg-white text-slate-600'
+        }`;
+      });
+    }
+
+    function setPaymentMode(mode) {
+      checkoutPaymentMode = mode;
+      document.querySelectorAll('.pay-mode-btn').forEach(btn => {
+        const active = btn.getAttribute('data-mode') === mode;
+        btn.className = `pay-mode-btn py-2 rounded-xl text-xs font-bold ${
+          active
+            ? 'border-2 border-emerald-500 bg-emerald-50 text-emerald-700'
+            : 'border border-slate-200 bg-white text-slate-600'
+        }`;
+      });
+    }
+
+    function updateCheckoutTotals() {
+      const { subtotal } = getCartDetails();
+      let discount = parseFloat(document.getElementById('checkout-discount').value) || 0;
+      if (discount < 0) discount = 0;
+      if (discount > subtotal) discount = subtotal;
+
+      const grandTotal = Math.max(0, subtotal - discount);
+      document.getElementById('checkout-subtotal').textContent = `₹${subtotal}`;
+      document.getElementById('checkout-discount-row').classList.toggle('hidden', discount <= 0);
+      document.getElementById('checkout-discount-display').textContent = `-₹${discount}`;
+      document.getElementById('checkout-grand-total').textContent = `₹${grandTotal}`;
+    }
+
+    function generateBill() {
+      const { items, subtotal } = getCartDetails();
+      if (items.length === 0) {
+        showToast('Add at least one item to generate a bill.', 'warning');
+        return;
+      }
+
+      let discount = Math.round(parseFloat(document.getElementById('checkout-discount').value) || 0);
+      if (discount < 0) discount = 0;
+      if (discount > subtotal) discount = subtotal;
+
+      const grandTotal = Math.max(0, subtotal - discount);
+      const customerName = (document.getElementById('checkout-customer').value || '').trim();
+      const customerPhone = (document.getElementById('checkout-phone').value || '').trim();
+
+      const bill = {
+        id: 'bill_' + Date.now(),
+        billNo: formatBillNo(billSeq),
+        timestamp: new Date().toISOString(),
+        dateKey: getTodayDateString(),
+        orderType: checkoutOrderType,
+        paymentMode: checkoutPaymentMode,
+        customerName,
+        customerPhone,
+        items,
+        subtotal,
+        discount,
+        grandTotal,
+        shopSnapshot: { ...settings }
+      };
+
+      // Save bill & increment sequence
+      billHistory.unshift(bill);
+      billSeq += 1;
+      saveToStorage(STORAGE_KEYS.HISTORY, billHistory);
+      saveToStorage(STORAGE_KEYS.BILL_SEQ, billSeq);
+
+      // Reset cart & checkout fields
+      cart = {};
+      document.getElementById('checkout-discount').value = 0;
+      document.getElementById('checkout-customer').value = '';
+      document.getElementById('checkout-phone').value = '';
+
+      closeCartDrawer();
+      renderPosMenu();
+      updateStickyCartBar();
+      updateHeaderInfo();
+
+      // Show 58mm Thermal Receipt Modal
+      openReceiptModal(bill);
+      showToast(`Bill ${bill.billNo} generated!`, 'success');
+    }
+
+    /* =========================================================================
+       7. 58MM THERMAL RECEIPT RENDERER & ESC/POS ENGINE
+       ========================================================================= */
+    function openReceiptModal(bill) {
+      currentReceiptBill = bill;
+      renderVisualReceipt(bill);
+      updateBluetoothUI();
+      document.getElementById('receipt-modal-overlay').classList.remove('hidden');
+    }
+
+    function closeReceiptModal() {
+      document.getElementById('receipt-modal-overlay').classList.add('hidden');
+    }
+
+    function renderVisualReceipt(bill) {
+      const shop = bill.shopSnapshot || settings;
+      const itemsHtml = bill.items.map(item => `
+        <tr class="align-top">
+          <td class="py-0.5 pr-1 break-words">${escapeHtml(item.name)}</td>
+          <td class="py-0.5 text-center whitespace-nowrap px-1">${item.qty}</td>
+          <td class="py-0.5 text-right whitespace-nowrap font-semibold">${item.total}</td>
+        </tr>
+      `).join('');
+
+      const html = `
+        <div class="text-center mb-2">
+          <div class="text-base font-extrabold tracking-wider uppercase">${escapeHtml(shop.shopName)}</div>
+          <div class="text-[10px] leading-tight mt-0.5">${escapeHtml(shop.address)}</div>
+          <div class="text-[10px] font-semibold mt-0.5">Mob: ${escapeHtml(shop.phone)}</div>
+        </div>
+
+        <div class="border-t border-dashed border-slate-800 my-1.5"></div>
+
+        <div class="text-[10px] space-y-0.5">
+          <div class="flex justify-between">
+            <span>Bill: <strong>${escapeHtml(bill.billNo)}</strong></span>
+            <span><strong>${escapeHtml(bill.orderType)}</strong></span>
+          </div>
+          <div class="flex justify-between">
+            <span>${formatDisplayDateTime(bill.timestamp)}</span>
+            <span>Pay: <strong>${escapeHtml(bill.paymentMode)}</strong></span>
+          </div>
+          ${bill.customerName || bill.customerPhone ? `
+            <div class="pt-0.5">
+              Cust: ${escapeHtml(bill.customerName || 'Guest')} ${bill.customerPhone ? '(' + escapeHtml(bill.customerPhone) + ')' : ''}
+            </div>
+          ` : ''}
+        </div>
+
+        <div class="border-t border-dashed border-slate-800 my-1.5"></div>
+
+        <table class="w-full text-[11px] border-collapse">
+          <thead>
+            <tr class="border-b border-dashed border-slate-800">
+              <th class="text-left pb-1 font-bold">Item</th>
+              <th class="text-center pb-1 font-bold px-1">Qty</th>
+              <th class="text-right pb-1 font-bold">Amt</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml}
+          </tbody>
+        </table>
+
+        <div class="border-t border-dashed border-slate-800 my-1.5"></div>
+
+        <div class="space-y-0.5 text-[11px]">
+          <div class="flex justify-between">
+            <span>Subtotal</span>
+            <span>Rs.${bill.subtotal}</span>
+          </div>
+          ${bill.discount > 0 ? `
+            <div class="flex justify-between">
+              <span>Discount</span>
+              <span>-Rs.${bill.discount}</span>
+            </div>
+          ` : ''}
+          <div class="border-t border-dashed border-slate-800 pt-1 mt-1 flex justify-between text-sm font-extrabold">
+            <span>TOTAL</span>
+            <span>Rs.${bill.grandTotal}</span>
+          </div>
+        </div>
+
+        <div class="border-t border-dashed border-slate-800 my-2"></div>
+
+        <div class="text-center text-[10px] font-semibold">
+          ${escapeHtml(shop.footer)}
+        </div>
+      `;
+
+      document.getElementById('print-area').innerHTML = html;
+    }
+
+    /* ----- ESC/POS 58mm (32-Char) Byte Builder ----- */
+    function wrapText32(text, maxLen = 32) {
+      const words = String(text || '').split(/\s+/);
+      const lines = [];
+      let current = '';
+      for (const word of words) {
+        if ((current + (current ? ' ' : '') + word).length <= maxLen) {
+          current += (current ? ' ' : '') + word;
+        } else {
+          if (current) lines.push(current);
+          current = word.slice(0, maxLen);
+        }
+      }
+      if (current) lines.push(current);
+      return lines;
+    }
+
+    function padLeftRight(left, right, width = 32) {
+      const l = String(left);
+      const r = String(right);
+      const spaces = Math.max(1, width - l.length - r.length);
+      return l.slice(0, Math.max(1, width - r.length - 1)) + ' '.repeat(spaces) + r;
+    }
+
+    function buildEscPosBytes(bill) {
+      const shop = bill.shopSnapshot || settings;
+      const enc = new TextEncoder();
+      const bytes = [];
+
+      const pushCmd = (...arr) => bytes.push(...arr);
+      const pushText = (str) => {
+        // Replace ₹ with Rs. because standard 58mm ESC/POS codepages don't print UTF-8 ₹
+        const safeStr = String(str).replace(/₹/g, 'Rs.');
+        bytes.push(...enc.encode(safeStr));
+      };
+      const pushLine = (str = '') => {
+        pushText(str);
+        pushCmd(0x0A);
+      };
+
+      const DIVIDER = '--------------------------------'; // 32 dashes
+
+      // Initialize printer
+      pushCmd(0x1B, 0x40);
+
+      // Header: Centered, Bold, Double Height
+      pushCmd(0x1B, 0x61, 0x01); // Center
+      pushCmd(0x1B, 0x45, 0x01); // Bold ON
+      pushCmd(0x1D, 0x21, 0x01); // Double height
+      pushLine(shop.shopName.toUpperCase());
+      pushCmd(0x1D, 0x21, 0x00); // Normal size
+      pushCmd(0x1B, 0x45, 0x00); // Bold OFF
+
+      wrapText32(shop.address, 32).forEach(line => pushLine(line));
+      pushLine('Mob: ' + shop.phone);
+
+      // Meta info: Left aligned
+      pushCmd(0x1B, 0x61, 0x00);
+      pushLine(DIVIDER);
+      pushLine(padLeftRight(`Bill: ${bill.billNo}`, bill.orderType, 32));
+      pushLine(padLeftRight(formatDisplayDateTime(bill.timestamp), bill.paymentMode, 32));
+      if (bill.customerName || bill.customerPhone) {
+        const cust = `Cust: ${bill.customerName || 'Guest'} ${bill.customerPhone || ''}`.trim();
+        wrapText32(cust, 32).forEach(l => pushLine(l));
+      }
+      pushLine(DIVIDER);
+
+      // Table Header: Item(18) Qty(5) Amt(9) = 32 chars
+      pushCmd(0x1B, 0x45, 0x01);
+      pushLine('Item               Qty       Amt');
+      pushCmd(0x1B, 0x45, 0x00);
+      pushLine(DIVIDER);
+
+      // Items
+      bill.items.forEach(item => {
+        const qtyStr = String(item.qty).padStart(3, ' ');
+        const amtStr = String(item.total).padStart(7, ' ');
+        const nameMax = 20;
+        const wrappedName = wrapText32(item.name, nameMax);
+
+        // First line with qty & amt
+        const firstLineName = (wrappedName[0] || '').padEnd(nameMax, ' ');
+        pushLine(`${firstLineName} ${qtyStr} ${amtStr}`);
+
+        // Overflow item name lines if any
+        for (let i = 1; i < wrappedName.length; i++) {
+          pushLine(wrappedName[i]);
+        }
+      });
+
+      pushLine(DIVIDER);
+
+      // Totals
+      pushLine(padLeftRight('Subtotal:', `Rs.${bill.subtotal}`, 32));
+      if (bill.discount > 0) {
+        pushLine(padLeftRight('Discount:', `-Rs.${bill.discount}`, 32));
+      }
+
+      pushCmd(0x1B, 0x45, 0x01); // Bold ON
+      pushCmd(0x1D, 0x21, 0x01); // Double height
+      pushLine(padLeftRight('GRAND TOTAL:', `Rs.${bill.grandTotal}`, 32));
+      pushCmd(0x1D, 0x21, 0x00); // Normal size
+      pushCmd(0x1B, 0x45, 0x00); // Bold OFF
+
+      pushLine(DIVIDER);
+
+      // Footer
+      pushCmd(0x1B, 0x61, 0x01); // Center
+      wrapText32(shop.footer, 32).forEach(l => pushLine(l));
+
+      // Paper feed & partial cut
+      pushCmd(0x0A, 0x0A, 0x0A, 0x0A);
+      pushCmd(0x1D, 0x56, 0x41, 0x03);
+
+      return new Uint8Array(bytes);
+    }
+
+    function uint8ToBase64(u8Arr) {
+      let binary = '';
+      for (let i = 0; i < u8Arr.length; i++) {
+        binary += String.fromCharCode(u8Arr[i]);
+      }
+      return btoa(binary);
+    }
+
+    /* =========================================================================
+       8. BLUETOOTH (WEB BLUETOOTH + RAWBT), SYSTEM PRINT & WHATSAPP
+       ========================================================================= */
+    function handleHeaderPrinterClick() {
+      if (btDevice && btDevice.gatt && btDevice.gatt.connected) {
+        showToast(`Connected to ${btDevice.name || 'Thermal Printer'}`, 'success');
+      } else {
+        connectBluetoothPrinter();
+      }
+    }
+
+    function updateBluetoothUI() {
+      const connected = Boolean(btDevice && btDevice.gatt && btDevice.gatt.connected && btCharacteristic);
+      const name = connected ? (btDevice.name || '58mm Printer') : '';
+
+      // Header pill
+      const dot = document.getElementById('header-bt-dot');
+      const txt = document.getElementById('header-bt-text');
+      dot.className = `w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`;
+      txt.textContent = connected ? name : 'Printer Off';
+
+      // Settings badge
+      const badge = document.getElementById('settings-bt-badge');
+      const devInfo = document.getElementById('settings-bt-device-name');
+      if (badge) {
+        badge.textContent = connected ? 'Connected' : 'Disconnected';
+        badge.className = `text-xs font-bold px-2.5 py-1 rounded-full ${
+          connected ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+        }`;
+      }
+      if (devInfo) {
+        devInfo.textContent = connected
+          ? `Ready to print on: ${name}`
+          : 'Connect a 58mm BLE thermal printer directly via Chrome Web Bluetooth, or use RawBT on Android for classic Bluetooth printers.';
+      }
+
+      // Receipt Modal status
+      const receiptStatus = document.getElementById('receipt-bt-status');
+      if (receiptStatus) {
+        receiptStatus.innerHTML = connected
+          ? `<span class="text-emerald-600"><i class="fa-solid fa-circle-check"></i> Connected to ${escapeHtml(name)}</span>`
+          : `<span class="text-slate-500">Bluetooth Printer not connected. Tap "Bluetooth Print" to pair or use "RawBT Print".</span>`;
+      }
+    }
+
+    async function connectBluetoothPrinter() {
+      if (!navigator.bluetooth) {
+        showToast('Web Bluetooth not supported here. Use Chrome on Android or tap RawBT Print!', 'warning');
+        return false;
+      }
+
+      try {
+        showToast('Searching for 58mm Bluetooth printers...', 'info');
+        const device = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: PRINTER_SERVICES
+        });
+
+        device.addEventListener('gattserverdisconnected', () => {
+          btCharacteristic = null;
+          updateBluetoothUI();
+          showToast('Bluetooth printer disconnected', 'warning');
+        });
+
+        const server = await device.gatt.connect();
+        let writeChar = null;
+
+        // Discover writable characteristic across known printer services
+        for (const serviceUuid of PRINTER_SERVICES) {
+          try {
+            const service = await server.getPrimaryService(serviceUuid);
+            const chars = await service.getCharacteristics();
+            for (const c of chars) {
+              if (c.properties.writeWithoutResponse || c.properties.write) {
+                writeChar = c;
+                break;
+              }
+            }
+            if (writeChar) break;
+          } catch (_) {
+            // Try next UUID
+          }
+        }
+
+        // Fallback: scan all primary services if supported
+        if (!writeChar && server.getPrimaryServices) {
+          try {
+            const services = await server.getPrimaryServices();
+            for (const service of services) {
+              const chars = await service.getCharacteristics();
+              for (const c of chars) {
+                if (c.properties.writeWithoutResponse || c.properties.write) {
+                  writeChar = c;
+                  break;
+                }
+              }
+              if (writeChar) break;
+            }
+          } catch (_) {}
+        }
+
+        if (!writeChar) {
+          showToast('Printer paired, but no writable BLE print service found. Try RawBT Print!', 'error');
+          return false;
+        }
+
+        btDevice = device;
+        btCharacteristic = writeChar;
+        updateBluetoothUI();
+        showToast(`Connected to ${device.name || 'Thermal Printer'}!`, 'success');
+        return true;
+      } catch (err) {
+        if (err && err.name !== 'NotFoundError') {
+          showToast('Bluetooth error: ' + (err.message || 'Connection failed'), 'error');
+        }
+        return false;
+      }
+    }
+
+    async function sendEscPosToBluetooth(bytes) {
+      if (!btDevice || !btDevice.gatt || !btDevice.gatt.connected || !btCharacteristic) {
+        const ok = await connectBluetoothPrinter();
+        if (!ok) return;
+      }
+
+      try {
+        // Send in safe 80-byte chunks to prevent BLE buffer overflow on 58mm printers
+        const CHUNK_SIZE = 80;
+        for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+          const chunk = bytes.slice(i, i + CHUNK_SIZE);
+          if (btCharacteristic.properties.writeWithoutResponse) {
+            await btCharacteristic.writeValueWithoutResponse(chunk);
+          } else {
+            await btCharacteristic.writeValue(chunk);
+          }
+          await new Promise(resolve => setTimeout(resolve, 35));
+        }
+        showToast('Receipt sent to Bluetooth printer!', 'success');
+      } catch (err) {
+        console.error('BLE Write error:', err);
+        showToast('Print failed. Reconnect printer or try RawBT Print.', 'error');
+      }
+    }
+
+    async function printCurrentBillBluetooth() {
+      if (!currentReceiptBill) return;
+      const bytes = buildEscPosBytes(currentReceiptBill);
+      await sendEscPosToBluetooth(bytes);
+    }
+
+    function printCurrentBillRawBT() {
+      if (!currentReceiptBill) return;
+      const bytes = buildEscPosBytes(currentReceiptBill);
+      const b64 = uint8ToBase64(bytes);
+      window.location.href = 'rawbt:base64,' + b64;
+      showToast('Opening RawBT Printer Service...', 'info');
+    }
+
+    function printCurrentBillSystem() {
+      window.print();
+    }
+
+    function shareCurrentBillWhatsApp() {
+      if (!currentReceiptBill) return;
+      const bill = currentReceiptBill;
+      const shop = bill.shopSnapshot || settings;
+
+      let text = `*${shop.shopName}*\n`;
+      text += `${shop.address}\n`;
+      text += `Mob: ${shop.phone}\n`;
+      text += `--------------------------------\n`;
+      text += `Bill No: *${bill.billNo}* (${bill.orderType})\n`;
+      text += `Date: ${formatDisplayDateTime(bill.timestamp)}\n`;
+      text += `Payment: ${bill.paymentMode}\n`;
+      if (bill.customerName) text += `Customer: ${bill.customerName}\n`;
+      text += `--------------------------------\n`;
+
+      bill.items.forEach(item => {
+        text += `${item.name} × ${item.qty} = ₹${item.total}\n`;
+      });
+
+      text += `--------------------------------\n`;
+      text += `Subtotal: ₹${bill.subtotal}\n`;
+      if (bill.discount > 0) text += `Discount: -₹${bill.discount}\n`;
+      text += `*GRAND TOTAL: ₹${bill.grandTotal}*\n`;
+      text += `--------------------------------\n`;
+      text += `${shop.footer}`;
+
+      let phoneParam = '';
+      if (bill.customerPhone) {
+        const digits = bill.customerPhone.replace(/\D/g, '');
+        if (digits.length === 10) phoneParam = '91' + digits;
+        else if (digits.length > 10) phoneParam = digits;
+      }
+
+      const url = `https://wa.me/${phoneParam}?text=${encodeURIComponent(text)}`;
+      window.open(url, '_blank');
+    }
+
+    function makeTestBill() {
+      return {
+        billNo: '#TEST-01',
+        timestamp: new Date().toISOString(),
+        orderType: 'Takeaway',
+        paymentMode: 'Cash',
+        customerName: 'Test Print',
+        customerPhone: '',
+        items: [
+          { name: 'Cheezy Bunz Special Burger', qty: 1, price: 90, total: 90 },
+          { name: 'Peri Peri Fries', qty: 1, price: 70, total: 70 }
+        ],
+        subtotal: 160,
+        discount: 0,
+        grandTotal: 160,
+        shopSnapshot: { ...settings }
+      };
+    }
+
+    async function testBluetoothPrint() {
+      const bytes = buildEscPosBytes(makeTestBill());
+      await sendEscPosToBluetooth(bytes);
+    }
+
+    function testRawBTPrint() {
+      const bytes = buildEscPosBytes(makeTestBill());
+      window.location.href = 'rawbt:base64,' + uint8ToBase64(bytes);
+      showToast('Sending Test Receipt to RawBT...', 'info');
+    }
+
+    /* =========================================================================
+       9. MENU MANAGER TAB LOGIC
+       ========================================================================= */
+    function populateCategoryDropdown() {
+      const select = document.getElementById('menu-item-category');
+      select.innerHTML = CATEGORIES.filter(c => c !== 'All')
+        .map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`)
+        .join('');
+    }
+
+    function renderMenuManagerList() {
+      const query = (document.getElementById('menu-mgr-search').value || '').trim().toLowerCase();
+      const filtered = menuItems.filter(item =>
+        !query || item.name.toLowerCase().includes(query) || item.category.toLowerCase().includes(query)
+      );
+
+      document.getElementById('menu-count').textContent = menuItems.length;
+      const list = document.getElementById('menu-mgr-list');
+
+      if (filtered.length === 0) {
+        list.innerHTML = `<p class="text-center text-xs text-slate-400 py-6">No matching items found.</p>`;
+        return;
+      }
+
+      list.innerHTML = filtered.map(item => `
+        <div class="py-2.5 flex items-center justify-between gap-2">
+          <div class="min-w-0">
+            <p class="text-sm font-bold text-slate-900 truncate">${escapeHtml(item.name)}</p>
+            <p class="text-xs text-slate-500">
+              <span class="font-extrabold text-brand-600">₹${item.price}</span> • ${escapeHtml(item.category)}
+            </p>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button onclick="editMenuItem('${item.id}')"
+              class="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 hover:bg-sky-100 flex items-center justify-center">
+              <i class="fa-solid fa-pen text-xs"></i>
+            </button>
+            <button onclick="confirmDeleteMenuItem('${item.id}')"
+              class="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 flex items-center justify-center">
+              <i class="fa-solid fa-trash text-xs"></i>
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function saveMenuItem(e) {
+      e.preventDefault();
+      const id = document.getElementById('menu-item-id').value;
+      const name = document.getElementById('menu-item-name').value.trim();
+      const price = Math.round(parseFloat(document.getElementById('menu-item-price').value));
+      const category = document.getElementById('menu-item-category').value;
+
+      if (!name || isNaN(price) || price <= 0) {
+        showToast('Enter valid item name and price.', 'warning');
+        return;
+      }
+
+      if (id) {
+        const idx = menuItems.findIndex(m => m.id === id);
+        if (idx !== -1) {
+          menuItems[idx] = { id, name, price, category };
+          showToast(`Updated "${name}"`, 'success');
+        }
+      } else {
+        menuItems.unshift({
+          id: 'm_' + Date.now(),
+          name,
+          price,
+          category
+        });
+        showToast(`Added "${name}" to menu`, 'success');
+      }
+
+      saveToStorage(STORAGE_KEYS.MENU, menuItems);
+      resetMenuForm();
+      renderMenuManagerList();
+      renderPosMenu();
+    }
+
+    function editMenuItem(id) {
+      const item = menuItems.find(m => m.id === id);
+      if (!item) return;
+
+      document.getElementById('menu-item-id').value = item.id;
+      document.getElementById('menu-item-name').value = item.name;
+      document.getElementById('menu-item-price').value = item.price;
+      document.getElementById('menu-item-category').value = item.category;
+
+      document.getElementById('menu-form-title').innerHTML = `<i class="fa-solid fa-pen-to-square text-brand-500"></i> Edit Menu Item`;
+      document.getElementById('menu-submit-btn').innerHTML = `<i class="fa-solid fa-check mr-1"></i> Update Item`;
+      document.getElementById('menu-cancel-edit').classList.remove('hidden');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function resetMenuForm() {
+      document.getElementById('menu-form').reset();
+      document.getElementById('menu-item-id').value = '';
+      document.getElementById('menu-form-title').innerHTML = `<i class="fa-solid fa-circle-plus text-brand-500"></i> Add New Menu Item`;
+      document.getElementById('menu-submit-btn').innerHTML = `<i class="fa-solid fa-check mr-1"></i> Save Item to Menu`;
+      document.getElementById('menu-cancel-edit').classList.add('hidden');
+    }
+
+    function confirmDeleteMenuItem(id) {
+      const item = menuItems.find(m => m.id === id);
+      if (!item) return;
+      openConfirmModal('Delete Menu Item?', `Remove "${item.name}" from your menu?`, () => {
+        menuItems = menuItems.filter(m => m.id !== id);
+        delete cart[id];
+        saveToStorage(STORAGE_KEYS.MENU, menuItems);
+        renderMenuManagerList();
+        renderPosMenu();
+        updateStickyCartBar();
+        showToast('Item deleted', 'info');
+      });
+    }
+
+    function confirmResetDefaultMenu() {
+      openConfirmModal('Reset Menu to Defaults?', 'This will replace your current menu list with the default Cheezy Bunz items.', () => {
+        menuItems = JSON.parse(JSON.stringify(DEFAULT_MENU));
+        cart = {};
+        saveToStorage(STORAGE_KEYS.MENU, menuItems);
+        renderMenuManagerList();
+        renderPosMenu();
+        updateStickyCartBar();
+        showToast('Default menu restored!', 'success');
+      });
+    }
+
+    /* =========================================================================
+       10. SALES & HISTORY TAB LOGIC
+       ========================================================================= */
+    function setHistoryFilter(filter) {
+      historyFilter = filter;
+      const isToday = filter === 'today';
+      document.getElementById('filter-today-btn').className = `px-3 py-1.5 rounded-lg text-xs font-bold ${isToday ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`;
+      document.getElementById('filter-all-btn').className = `px-3 py-1.5 rounded-lg text-xs font-bold ${!isToday ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`;
+      renderHistoryTab();
+    }
+
+    function renderHistoryTab() {
+      const todayKey = getTodayDateString();
+      const todayBills = billHistory.filter(b => b.dateKey === todayKey);
+
+      const totalSales = todayBills.reduce((s, b) => s + b.grandTotal, 0);
+      const cashTotal = todayBills.filter(b => b.paymentMode === 'Cash').reduce((s, b) => s + b.grandTotal, 0);
+      const onlineTotal = todayBills.filter(b => b.paymentMode !== 'Cash').reduce((s, b) => s + b.grandTotal, 0);
+
+      document.getElementById('history-today-date').textContent = new Date().toLocaleDateString('en-IN', {
+        weekday: 'short', day: 'numeric', month: 'short'
+      });
+      document.getElementById('stat-total-sales').textContent = `₹${totalSales}`;
+      document.getElementById('stat-total-orders').textContent = todayBills.length;
+      document.getElementById('stat-cash-total').textContent = `₹${cashTotal}`;
+      document.getElementById('stat-online-total').textContent = `₹${onlineTotal}`;
+
+      const listToShow = historyFilter === 'today' ? todayBills : billHistory;
+      const container = document.getElementById('history-list');
+
+      if (listToShow.length === 0) {
+        container.innerHTML = `
+          <div class="bg-white rounded-2xl p-8 text-center border border-slate-200">
+            <i class="fa-solid fa-receipt text-3xl text-slate-300 mb-2"></i>
+            <p class="text-sm font-bold text-slate-600">No bills recorded yet</p>
+            <p class="text-xs text-slate-400 mt-1">Completed orders will appear here for reprinting.</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = listToShow.map(bill => {
+        const payBadge = bill.paymentMode === 'Cash'
+          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+          : 'bg-indigo-50 text-indigo-700 border-indigo-200';
+        const itemSummary = bill.items.map(i => `${i.name} (${i.qty})`).join(', ');
+
+        return `
+          <div class="bg-white rounded-2xl p-3.5 shadow-sm border border-slate-200 space-y-2">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="font-extrabold text-sm text-slate-900">${escapeHtml(bill.billNo)}</span>
+                  <span class="text-[10px] font-bold px-2 py-0.5 rounded-md border ${payBadge}">${escapeHtml(bill.paymentMode)}</span>
+                  <span class="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">${escapeHtml(bill.orderType)}</span>
+                </div>
+                <p class="text-[11px] text-slate-500 mt-0.5">${formatDisplayDateTime(bill.timestamp)}</p>
+              </div>
+              <span class="text-base font-extrabold text-brand-600">₹${bill.grandTotal}</span>
+            </div>
+
+            <p class="text-xs text-slate-600 line-clamp-2 bg-slate-50 px-2.5 py-1.5 rounded-xl">${escapeHtml(itemSummary)}</p>
+
+            <div class="flex items-center justify-end gap-2 pt-0.5">
+              <button onclick="reprintBill('${bill.id}')"
+                class="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold flex items-center gap-1.5 tap-pop">
+                <i class="fa-solid fa-print text-[11px]"></i> Reprint / View
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function reprintBill(billId) {
+      const bill = billHistory.find(b => b.id === billId);
+      if (bill) openReceiptModal(bill);
+    }
+
+    function shareTodaySummaryWhatsApp() {
+      const todayKey = getTodayDateString();
+      const todayBills = billHistory.filter(b => b.dateKey === todayKey);
+      const totalSales = todayBills.reduce((s, b) => s + b.grandTotal, 0);
+      const cashTotal = todayBills.filter(b => b.paymentMode === 'Cash').reduce((s, b) => s + b.grandTotal, 0);
+      const onlineTotal = todayBills.filter(b => b.paymentMode !== 'Cash').reduce((s, b) => s + b.grandTotal, 0);
+
+      const text =
+        `*${settings.shopName} — Daily Sales Summary*\n` +
+        `Date: ${new Date().toLocaleDateString('en-IN')}\n` +
+        `--------------------------------\n` +
+        `Total Orders: *${todayBills.length}*\n` +
+        `Cash Sales: ₹${cashTotal}\n` +
+        `UPI/Online Sales: ₹${onlineTotal}\n` +
+        `*TOTAL SALES: ₹${totalSales}*`;
+
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    }
+
+    function exportSalesCSV() {
+      const list = historyFilter === 'today'
+        ? billHistory.filter(b => b.dateKey === getTodayDateString())
+        : billHistory;
+
+      if (list.length === 0) {
+        showToast('No bills to export.', 'warning');
+        return;
+      }
+
+      const rows = [['Bill No', 'Date Time', 'Order Type', 'Payment Mode', 'Customer', 'Subtotal', 'Discount', 'Grand Total', 'Items']];
+      list.forEach(b => {
+        const itemsStr = b.items.map(i => `${i.name} x${i.qty}`).join(' | ');
+        rows.push([
+          b.billNo,
+          formatDisplayDateTime(b.timestamp),
+          b.orderType,
+          b.paymentMode,
+          b.customerName || '',
+          b.subtotal,
+          b.discount,
+          b.grandTotal,
+          `"${itemsStr.replace(/"/g, '""')}"`
+        ]);
+      });
+
+      const csvContent = rows.map(r => r.join(',')).join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `cheezy_bunz_sales_${getTodayDateString()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('CSV exported!', 'success');
+    }
+
+    function confirmClearHistory() {
+      if (billHistory.length === 0) {
+        showToast('History is already empty.', 'info');
+        return;
+      }
+      openConfirmModal('Clear All Bill History?', 'This will permanently delete all saved past bills from this device.', () => {
+        billHistory = [];
+        saveToStorage(STORAGE_KEYS.HISTORY, billHistory);
+        renderHistoryTab();
+        updateHeaderInfo();
+        showToast('Bill history cleared', 'info');
+      });
+    }
+
+    /* =========================================================================
+       11. SETTINGS TAB LOGIC
+       ========================================================================= */
+    function populateSettingsForm() {
+      document.getElementById('set-shop-name').value = settings.shopName;
+      document.getElementById('set-shop-address').value = settings.address;
+      document.getElementById('set-shop-phone').value = settings.phone;
+      document.getElementById('set-shop-footer').value = settings.footer;
+      document.getElementById('settings-next-bill').textContent = formatBillNo(billSeq);
+      updateBluetoothUI();
+    }
+
+    function saveSettings(e) {
+      e.preventDefault();
+      settings = {
+        shopName: document.getElementById('set-shop-name').value.trim() || DEFAULT_SETTINGS.shopName,
+        address: document.getElementById('set-shop-address').value.trim() || DEFAULT_SETTINGS.address,
+        phone: document.getElementById('set-shop-phone').value.trim() || DEFAULT_SETTINGS.phone,
+        footer: document.getElementById('set-shop-footer').value.trim() || DEFAULT_SETTINGS.footer
+      };
+      saveToStorage(STORAGE_KEYS.SETTINGS, settings);
+      updateHeaderInfo();
+      showToast('Shop settings saved!', 'success');
+    }
+
+    function confirmResetBillCounter() {
+      openConfirmModal('Reset Bill Counter?', 'Next bill number will start again from #CB-001.', () => {
+        billSeq = 1;
+        saveToStorage(STORAGE_KEYS.BILL_SEQ, billSeq);
+        populateSettingsForm();
+        updateHeaderInfo();
+        showToast('Bill counter reset to #CB-001', 'success');
+      });
+    }
+
+    /* =========================================================================
+       12. INITIALIZATION
+       ========================================================================= */
+    window.addEventListener('DOMContentLoaded', () => {
+      populateCategoryDropdown();
+      renderCategoryPills();
+      renderPosMenu();
+      updateHeaderInfo();
+      updateBluetoothUI();
+    });
+  </script>
+</body>
+</html>
